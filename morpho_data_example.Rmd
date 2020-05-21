@@ -1,0 +1,80 @@
+---
+title: "Untitled"
+author: "Nathan Brouwer"
+date: "12/1/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+https://rpubs.com/cole3136/265405
+
+```{r}
+charmat <- matrix(
+  c(0, 0, 0, 1, 0,  #S.paradoxus
+    1, 1, 1, 0, 0,  #S.floridanus
+    1, 1, 0, 0, 1,  #S.carlinensis
+    1, 0, 0, 1, 1,  #M.monax
+    1, 1, 0, 1, 1), #C.ludovicianus
+  nrow = 5, ncol = 5,
+  byrow = TRUE,
+  
+  #Enter species names here, separated by an underscore
+  dimnames = list(c('Solenodon_paradoxus', 'Sylvatius_floridanus',
+                    'Sciurus_carolinensis','Marmota_monax',
+                    'Cynomys_ludovicianus'),
+              
+              #Enter short character names here
+              c('Diastema', 'Auditory Bullae', 'Fenestarted Maxillary',
+                'Sagittal Crest', 'Number of Coronoid Processes'))
+  ) #<-- don't delete, is corresponds to the first "(" after the word "matrix above"
+                              
+#Look at the character matrix.
+charmat
+```
+
+
+```{r}
+#Convert the character matrix to a phyDat object 
+  #in order to infer a tree. By assigning the matrix 
+  #type as 'user' we can specify the components of the 
+  #matrix (in this case, binary 1s and 0s).
+skullchars <- phangorn::as.phyDat(charmat, type="USER", levels = c(0,1))
+
+#Calculate a distance matrix from the character data.
+char.dm <- phangorn::dist.ml(skullchars)
+
+#Use the pratchet function (parsimony ratchet) to find the most
+  #parsimonious tree. Specifying k=25 means the algorithm will search   
+  #through 25 possible trees to find the most parsimonious solution.
+tree <- phangorn::pratchet(skullchars, k=25, trace = 0)
+
+#print number of changes for best solution under parsimony
+phangorn::parsimony(tree, skullchars)
+```
+
+```{r}
+#Calculate branch lengths using the distance matrix.
+tree <- nnls.phylo(tree, char.dm)
+
+#Plot the tree.
+plot.phylo(tree, use.edge.length = F, type = "unrooted")
+```
+
+
+```{r}
+#Root the tree by the designated outgroup 
+  #(write the species name as it appears in the tree, 
+  #but add an underscore to fill the space).
+chartree <- tree
+chartree <- root(tree,outgroup = "Solenodon_paradoxus", resolve.root = T)
+
+#Plot the rooted tree.
+plot(chartree, use.edge.length = F)
+```
+

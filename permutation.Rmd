@@ -1,0 +1,171 @@
+---
+title: "Permutaiton Probablity test"
+author: "Nathan Brouwer"
+date: "12/5/2019"
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warnings = FALSE)
+```
+
+```{r}
+library(phangorn)
+library(phytools)
+library(ape)
+```
+
+##### Full trait matrix: Table 7.9
+
+20 binary morphological traits of carnivores
+
+```{r}
+#data
+outgroup <-c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+cat      <-c(0,1,0,1,0,0,1,1,1,0,0,0,1,1,1,0,0,0,0,0)
+hyena    <-c(0,1,0,1,0,0,1,0,1,0,0,0,1,1,1,1,0,0,0,0)
+civet    <-c(0,1,0,0,0,0,0,0,1,0,0,0,0,0,1,1,0,0,0,0)
+dog      <-c(1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+racoon   <-c(1,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0)
+bear     <-c(1,0,0,0,1,1,0,0,0,1,0,0,0,0,0,0,1,1,0,1)
+otter    <-c(1,0,0,0,1,0,0,0,0,1,0,0,1,0,1,1,1,0,0,0)
+seal     <-c(1,0,1,0,1,1,0,0,0,1,1,1,0,1,1,1,0,0,1,1) #large 4 originaly NA,0,1,1
+walrus   <-c(1,0,1,0,1,1,0,0,0,1,1,1,0,0,1,1,0,1,1,1)
+sealion  <-c(1,0,1,0,1,1,0,0,0,1,0,0,0,1,1,1,0,1,1,1)
+
+#rbind it
+carn7.9 <- rbind(outgroup = outgroup, #?mole?
+            cat = cat,
+            hyena = hyena,
+            civet = civet,
+            dog = dog,
+            racoon = racoon,
+            bear = bear,
+            otter = otter,
+            seal = seal,
+            walrus = walrus,
+            sealion = sealion)
+```
+
+
+
+Permute the matrix
+```{r}
+taxa <- rownames(carn7.9)
+n.taxa <- length(taxa)
+n.traits <- ncol(carn7.9)
+
+perumuted.matrix <- carn7.9
+for(j in 1:n.traits){
+  permute.taxa <- sample(x = taxa, size = n.taxa, replace = F)
+  perumuted.matrix[,j] <- perumuted.matrix[permute.taxa, j]
+}
+
+
+```
+
+
+
+```{r}
+#Original matrix
+carn7.9
+
+#Permuted
+perumuted.matrix
+```
+
+
+## Original tree
+
+```{r}
+carn7.9.phyData <- phangorn::phyDat(carn7.9,
+                                    type = "USER", 
+                                    levels = c(0,1))
+dm <- dist.hamming(carn7.9.phyData)
+tree <- NJ(dm)
+
+tree.orig <- optim.parsimony(tree, carn7.9.phyData)
+
+#
+CI(tree.orig,
+   carn7.9.phyData)
+
+#
+parsimony(tree.orig,carn7.9.phyData)
+
+```
+
+## Permutation test
+
+```{r}
+# how many times to do algo
+n.permutations <- 500
+n.traits <- ncol(carn7.9)
+
+#storage vector
+output <- data.frame(tree.length = rep(NA, n.permutations),
+                     CI = rep(NA, n.permutations))
+  
+
+#outer loop: number of permutations
+for(i in 1:n.permutations){
+
+#make copy of matrix
+perumuted.matrix <- carn7.9
+
+#in loop: permuate the matrx
+for(j in 1:n.traits){
+  permute.taxa <- sample(x = taxa, size = n.taxa, replace = F)
+  perumuted.matrix[,j] <- perumuted.matrix[permute.taxa, j]
+}
+
+#convert data type
+perumuted.matrix.phyData <- phyDat(perumuted.matrix, 
+                                   type = "USER", 
+                                   levels = c(0,1))
+#build tree
+## build NJ guide tree
+dm.i <- dist.hamming(perumuted.matrix.phyData)
+guide.tree.i <- NJ(dm.i)
+
+tree.i <- tryCatch(optim.parsimony(tree = guide.tree.i, 
+                          data = perumuted.matrix.phyData))
+
+if(inherits(tree.i, "error")) next
+  
+#calculate consistency index
+CI.i       <- tryCatch(CI(tree.i, perumuted.matrix.phyData))
+parsimony.i <- tryCatch(parsimony(tree.i, perumuted.matrix.phyData))
+
+if(inherits(CI.i, "error")) next
+if(inherits(parsimony.i, "error")) next
+  
+
+output[i,"tree.length"] <- parsimony.i
+output[i,"CI"] <- CI.i
+}
+
+
+```
+
+# Plot histogram
+
+```{r}
+hist(output$tree.length, xlim = c(29, 52))
+abline(v = min(output$tree.length))
+abline(v = parsimony(tree.orig,carn7.9.phyData), col = 2)
+```
+
+
+## Approximate p value
+
+p < 1/n.permutations
+if n.permutations = 1000
+p < 1/1000
+p < 0.001
+
+

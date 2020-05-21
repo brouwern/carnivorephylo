@@ -1,0 +1,327 @@
+---
+title: "Untitled"
+author: "Nathan Brouwer"
+date: "12/5/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Packages
+
+```{r, warnings = F,message=F}
+#install.packages("rentrez")
+#install.packages("msa")
+#install.packages("phangorn")
+#install.packages("phytools")
+#install.packages("ape")
+
+library(rentrez)
+library(msa)
+library(phangorn)
+library(phytools)
+library(ape)
+```
+
+
+
+### Molecular data: transthyretin Intro I
+
+The authors write in their acknowledgemetns sections "The new nucleotide sequences reported in this paper have been deposited with GenBank under Accession Nos. AF039722–AF039745" (this should be in the methods...).
+
+I want to download all of these accession numbers.  This is how I did it
+
+First, the part that's  constant for all of them: "AF039"
+```{r}
+accession.prefix <- "AF039"
+```
+
+Then the part that varies: 722-745.
+```{r}
+accession.suff <- seq(722,745,1)
+```
+
+Past together
+```{r}
+accessions <- paste(accession.prefix,accession.suff, sep = "")
+```
+
+How many?
+```{r}
+length(accessions)
+```
+
+The methods say "Nucleotide sequence variation in the nuclear transthyretin intron I was examined for 22 species of carnivorans, and 3 noncarnivoran eutherian outgroups".  I might be missing one but I won't worry about that.
+
+
+
+Set up the common names into dataframe
+```{r}
+common_names_full <- c("Beluga whale",
+"Eastern mole",
+"European wildcat",
+"lion",
+"Common kusimanse",
+"Ring-tailed vontsira",
+"Spotted hyena",
+"African palm civet",
+"Asian palm civet",
+"Malayan civet",
+"wolf",
+"red fox",
+"Neotropical otter",
+"Long-tailed weasel",
+"raccoon",
+"Kinkajou",
+"giant panda",
+"Red panda",
+"Spectacled bear",
+"brown bear",
+"bearded seal",
+"walrus",
+'Northern fur seal',
+"California sea lion")
+```
+
+```{r}
+common_names_short <- c("whale",
+"mole",
+"wildcat",
+"lion",
+"kusimanse",
+"vontsira",
+"hyena",
+"civet1",
+"civet2",
+"civet3",
+"wolf",
+"fox",
+"otter",
+"weasel",
+"raccoon",
+"Kinkajou",
+"panda",
+"Red panda",
+"spectacled bear",
+"brown bear",
+"seal",
+"walrus",
+"seal",
+"sea lion")
+```
+
+
+```{r}
+latin_names <- c("Delphinapterus leucas",
+"Scalopus aquaticus",
+"Felis silvestris",
+"Panthera leo",
+"Crossarchus obscurus",
+"Galidia elegans",
+"Crocuta crocuta",
+"Nandinia binotata",
+"Paradoxurus hermaphroditus",
+"Viverra tangalunga",
+"Canis lupus",
+"Vulpes vulpes",
+"Lontra longicaudis",
+"Mustela frenata",
+"Procyon lotor",
+"Potos flavus",
+"Ailuropoda melanoleuca",
+"Ailurus fulgens",
+"Tremarctos ornatus",
+"Ursus arctos",
+"Erignathus barbatus",
+"Odobenus rosmarus",
+"Callorhinus ursinus",
+"Zalophus californianus")
+```
+
+
+```{r}
+treethink_spp <- c("cat", "hyena","civet","dog","racoon", "bear","otter","seal","walrus","sealion")
+```
+
+
+```{r}
+tree_think_names <- rep(NA, 24)
+```
+
+Make dataframe
+```{r}
+species_names <-cbind(common_names_full,
+                      common_names_short,
+                      latin_names,
+                      accessions,
+                      tree_think_names)
+```
+
+```{r}
+
+```
+
+
+```{r}
+i.cat <- grep("wildcat", species_names[,"common_names_short"])
+i.mole <- grep("mole", species_names[,"common_names_short"])
+i.hyena <- grep("hyena", species_names[,"common_names_short"])
+i.civet <- grep("civet", species_names[,"common_names_short"])
+i.dog <- grep("wolf", species_names[,"common_names_short"])
+i.trashpanda <- grep("racoon", species_names[,"common_names_short"])
+i.bear <- grep("brown bear", species_names[,"common_names_short"])
+#i.bear <- grep("spectacled bear", species_names[,"common_names_short"])
+i.otter <- grep("otter", species_names[,"common_names_short"])
+i.seal <- grep("seal", species_names[,"common_names_short"])
+i.walrus <- grep("walrus", species_names[,"common_names_short"])
+i.sealion <- grep("sea lion", species_names[,"common_names_short"])
+
+species_names[i.cat,"tree_think_names"] <- "cat"
+species_names[i.mole,"tree_think_names"] <- "mole"
+species_names[i.hyena,"tree_think_names"] <- "hyena"
+species_names[i.civet[1],"tree_think_names"] <- "civet"
+species_names[i.dog,"tree_think_names"] <- "dog"
+species_names[i.trashpanda,"tree_think_names"] <- "racoon"
+species_names[i.bear,"tree_think_names"] <- "bear"
+species_names[i.otter,"tree_think_names"] <- "otter"
+species_names[i.seal,"tree_think_names"] <- "seal"
+species_names[i.walrus,"tree_think_names"] <- "walrus"
+species_names[i.sealion,"tree_think_names"] <- "sealion"
+
+```
+
+
+### Download sequences
+
+
+
+```{r}
+i.treethink <- which(species_names[,"tree_think_names"] %in% treethink_spp)
+species_names[i.treethink,]
+transth_tree_think <- entrez_fetch(db = "nucleotide", 
+                          id = species_names[i.treethink,"accessions"], 
+                          rettype = "fasta")
+```
+
+
+Create source file for MSA workflow
+```{r}
+sink("transth_tree_think.txt")
+cat(transth_tree_think)
+sink()
+file.show("transth_tree_think.txt")
+```
+
+
+
+Set up the data
+```{r}
+transth_tree_think_stringset <- Biostrings::readDNAStringSet("transth_tree_think.txt")
+# unlink(here::here("transth_tree_think.txt"))
+names(transth_tree_think_stringset)
+```
+
+
+
+Swap out latin names for common nmes
+
+```{r}
+transth_tree_think_stringset@ranges@NAMES <- species_names[i.treethink,"tree_think_names"]
+
+
+```
+
+```{r}
+transth_tree_think_align <- msa(transth_tree_think_stringset,
+                     method = "ClustalW")
+```
+
+
+```{r}
+str(transth_tree_think_align)
+```
+
+
+
+ Amphicyonidae† ("bear-dogs")
+ Canidae (wolves, foxes)
+ Hemicyonidae† ("dog-bears")
+ Ursidae (bears)
+ Ailuridae (red pandas)
+ Enaliarctidae† (extinct pinnipeds)
+ Odobenidae (walrus)
+ Otariidae (sea lions)
+ Phocidae (true seals)
+ Mephitidae (skunks)
+ Mustelidae (weasels, wolverines)
+ Procyonidae (raccoons, kinkajous)
+ 
+ "A large 266-base-pair
+insertion specific to Caniformia was excluded from
+phylogenetic analyses considering that it had multiple
+repeat elements that made alignment difficult. The
+total number of sites remaining was 851 (291 parsimony
+informative) available for phylogenetic analysis."
+ 
+```{r}
+x <- c("CTTTGGCTCAGGTCATGATCCCAGGGCCCTGGGATCRAGSCCCACATTGGGCTCCTGGYTCAGGAGGGAACCTGCT--TCTCCCTCTCCCTGCTG----CTCCCTGTGCTTGTGCTCTCTCTCTCTC------AAATAAA----GAAAATCTTAAAATAA--------GAAAAAGAATAGATTCTGTCACTCTTACCAGTTTTGTTGACCTCTCACTGGC")
+
+nchar(x)
+```
+ 
+ 
+```{r}
+y <- c("GGGGCACCTGGATAGCTCAGTTGGTTAAGCATCTGCCTTCGGCTCGGGTCATGGTCCTGAGGTCTTGAGATCAAGTCCCACATCGGGCTCCCTGCTCCACGGGAAGCCTGCTTCTCCCTCTCCCTCTGCCTGTCACTCCCCCAGGTTGTGCTCTCCCTCCTTCTGTC--AAATAAATAAATGAAATCTGAAAATTTTTTAAAAATGAAAAGAATAGATCCTTTCCCTCTTATCACTTTTGTTGACTTCTTTATGGC")
+nchar(y)
+```
+ 
+```{r}
+print(transth_tree_think_align, 
+      show=c("alignment","complete"), 
+      showNames=TRUE, 
+      showConsensus=FALSE, 
+      halfNrow=9, nameWidth=20)
+```
+
+### Full alignment
+```{r}
+msaPrettyPrint(transth_tree_think_align)
+
+msaPrettyPrint(transth_tree_think_align, 
+               #output="asis", 
+              #y=c(2000, 2100),
+               showNames="left", 
+               #showLogo="top",
+               consensusColor="ColdHot", 
+               shadingMode = "functional",
+               shadingModeArg = "structure",
+               showLegend=TRUE,
+               showConsensus = "bottom",
+               askForOverwrite=FALSE)
+```
+
+
+```{r}
+transth_tree_think_align2 <- msaConvert(transth_tree_think_align, type="seqinr::alignment")
+```
+
+## Distances - raw
+
+```{r}
+transth_tree_think_dist <- seqinr::dist.alignment(transth_tree_think_align2, "similarity")
+```
+
+
+```{r}
+
+transth_tree_think_tree <- nj(transth_tree_think_dist)
+plot(transth_tree_think_tree)
+```
+
+```{r}
+phangorn::phyDat(transth_tree_think_align2)
+
+is(transth_tree_think_align)
+```

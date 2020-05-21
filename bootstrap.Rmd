@@ -1,0 +1,226 @@
+---
+title: "Bootstrapping"
+author: "Nathan Brouwer"
+date: "12/5/2019"
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warnings = FALSE, message = FALSE)
+```
+
+## Preliminaries
+
+### Packages
+
+```{r, warnings = F,message=F}
+#install.packages("rentrez")
+#install.packages("phangorn")
+#install.packages("phytools")
+#install.packages("ape")
+
+library(rentrez)
+library(phangorn)
+library(phytools)
+library(ape)
+```
+
+
+
+### Data
+
+#### Carnivore morphological data
+
+12 morphological characters (Table 7.1) scored as 0 (trait absent, or trait is in inferred ancestral state) or 1 (trait present, or trait is different than inferred ancestral condition).  This is binary scoring.  Alternatively, traits could be ranked or "ordinal."  See Table 1 FELSENSTEIN (1984) for an example of ordinal scores.
+
+A preliminary data matrix is in Table 7.2 (pg 177).  Slightly edited matrix is in Table 7.4 (few differences from Table 7.2; question marks set to 0 for Outgroup.)  Table 7.9 expands it to 20 characters for additional analyses..
+
+##### Table 7.2 / 7.4
+
+Tables 7.2 and 7.4 present 12 morphological traits.
+
+
+```{r}
+#data
+outgroup <-c(0,0,0,0,0,0,0,0,0,0,0,0)
+cat      <-c(0,1,0,1,0,0,1,1,1,0,0,0)
+hyena    <-c(0,1,0,1,0,0,1,0,1,0,0,0)
+civet    <-c(0,1,0,0,0,0,0,0,1,0,0,0)
+dog      <-c(1,0,0,0,1,0,0,0,0,0,0,0)
+racoon   <-c(1,0,0,0,1,0,0,0,0,0,0,0)
+bear     <-c(1,0,0,0,1,1,0,0,0,1,0,0)
+otter    <-c(1,0,0,0,1,0,0,0,0,1,0,0)
+seal     <-c(1,0,1,0,1,1,0,0,0,1,1,1) 
+walrus   <-c(1,0,1,0,1,1,0,0,0,1,1,1)
+sealion  <-c(1,0,1,0,1,1,0,0,0,1,0,0)
+
+#rbind it
+carn7.4 <- rbind(outgroup = outgroup, #?mole?
+                 cat = cat,
+                 hyena = hyena,
+                 civet = civet,
+                 dog = dog,
+                 racoon = racoon,
+                 bear = bear,
+                 otter = otter,
+                 seal = seal,
+                 walrus = walrus,
+                 sealion = sealion)
+
+```
+
+
+
+
+## Boot strapping
+
+Table 8.3
+```{r}
+carn8.3 <- carn7.4[,1:10]
+
+
+```
+
+Name the columns
+```{r}
+traits <-  paste("trt",c(1:ncol(carn8.3)), sep = "")
+colnames(carn8.3) <-traits
+```
+
+Build a tree
+```{r, warnings = F}
+carn8.3.phyDat <- phangorn::phyDat(carn8.3, type = "USER", levels = c(0,1))
+carn8.3.ratchet <- phangorn::pratchet(carn8.3.phyDat, maxit=5000,
+                                      minit=5, k=5, trace=0)
+carn8.3.ratchet.root <- root(carn8.3.ratchet,
+                             outgroup = "outgroup")
+```
+
+
+There are 11 taxa and 10 columns in this version of the table
+```{r}
+dim(carn8.3)
+n.cols <- ncol(carn8.3)
+```
+
+
+Bootstrapping works by randomly selectin WITH REPLACEMENT 10 rows from the original matrix.  A tree is built from each one, then the trees are compared.  Clades in the best tree that appear consistnely in all the bootstrap trees have "high bootstrap support."  Clades from the origianl tree the are rare among the bootstrap trees have low bootstrap support.
+
+We can generate 10 random columns using sample() 
+Note: REPLACE = TRUE!  This is key
+```{r}
+sample(x = traits, size = n.cols, replace = T)
+sample(x = traits, size = n.cols, replace = T)
+sample(x = traits, size = n.cols, replace = T)
+sample(x = traits, size = n.cols, replace = T)
+sample(x = traits, size = n.cols, replace = T)
+sample(x = traits, size = n.cols, replace = T)
+sample(x = traits, size = n.cols, replace = T)
+sample(x = traits, size = n.cols, replace = T)
+```
+
+We can create a new data matrix like this
+```{r}
+#same traits
+boot1.traits <- sample(x = traits, size = n.cols, replace = T)
+
+#make new matrix
+boot1.mat <- carn8.3[,boot1.traits]
+```
+
+
+Compare old to new
+```{r}
+#original matrix: 10 traits, each occurds once
+carn8.3
+
+#a bootstrap matrix: traits can occur more than once
+## or not at all
+boot1.mat
+```
+
+Note that traits (columns) can appear more than once!
+  
+We can now use this new matrix to build a phylogeny
+```{r, warning = F}
+boot1.phyDat <- phangorn::phyDat(boot1.mat, type = "USER", levels = c(0,1))
+boot1.ratchet <- phangorn::pratchet(boot1.phyDat, maxit=5000,
+                                    minit=5, k=5, trace=0)
+boot1.ratchet.root <- root(boot1.ratchet,
+                           outgroup = "outgroup", 
+                           resolve.root = T)
+```
+
+Compare best tree vs. boot
+```{r}
+par(mfrow = c(2,1), mar = c(2,2,2,2))
+plot(carn8.3.ratchet.root, main = "best tree", cex =1.2)
+plot(boot1.ratchet.root, main = "boot 2")
+```
+
+\newpage
+
+Bootstrapping invovles repeating this many many many many many many many times.  Let's do just a few
+```{r , fig.height=6,fig.width=10, warnings = F, message = F}
+par(mfrow = c(4,4), mar = c(1,1,1,1))
+
+plot(carn8.3.ratchet.root, main = "best tree", cex =1.2)
+for(i in 1:15){
+booti.traits <- sample(x = traits, size = n.cols, replace = T)
+booti.mat <- carn8.3[,booti.traits]
+booti.phyDat <- phangorn::phyDat(booti.mat, type = "USER", levels = c(0,1))
+booti.ratchet <- phangorn::pratchet(booti.phyDat, maxit=5000,
+                        minit=5, k=5, trace=0)
+booti.ratchet.root <- root(booti.ratchet,
+                               outgroup = "outgroup", 
+                               resolve.root = T)
+
+plot(booti.ratchet.root)
+}
+```
+
+
+When boot strapping is done you can calcualte the % of time given clade appears among all the bootstrap samples.  A "well supported clade" will occur many times.  A poorly supported clade will occur rarely.  Poorly supported clades are usually defined as those which appear in <50% of bootstrap samples.  These clades are often turned into polytomies in consensus trees.
+
+```{r, warnings = FALSE, error = FALSE}
+iterations <- 100
+output <- data.frame(i = 1:iterations,
+                     newick = rep(NA, iterations))
+
+for(i in 1:iterations){
+booti.traits <- sample(x = traits, size = n.cols, replace = T)
+booti.mat <- carn8.3[,booti.traits]
+booti.phyDat <- phangorn::phyDat(booti.mat, type = "USER", levels = c(0,1))
+booti.ratchet <- phangorn::pratchet(booti.phyDat, maxit=5000,
+                        minit=5, k=5, trace=0)
+booti.ratchet.root <- root(booti.ratchet,
+                               outgroup = "outgroup", 
+                               resolve.root = T)
+newick.i <- write.tree(booti.ratchet.root)
+output[i,"newick"] <- newick.i
+}
+
+j.cat.hyena <- grep("cat,hyena",output$newick)
+j.hyena.cat <- grep("hyena,cat",output$newick)
+j.all <- c(j.cat.hyena,j.hyena.cat)
+
+k.seal.walrus <- grep("seal,walrus",output$newick)
+k.walrus.seal <- grep("walrus,seal",output$newick)
+k.all <- c(k.seal.walrus,k.walrus.seal)
+
+l.racoon.bear <- grep("racoon,bear",output$newick)
+l.bear.racoon <- grep("bear,racoon",output$newick)
+l.all <- c(l.racoon.bear,l.bear.racoon)
+
+
+#output[j.all,]
+# output[k.all,]
+length(j.all)/iterations
+length(k.all)/iterations
+length(l.all)/iterations
+```
+

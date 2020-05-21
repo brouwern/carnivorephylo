@@ -1,0 +1,854 @@
+---
+title: "Carnivore molecular data"
+author: "Nathan Brouwer"
+date: "12/3/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F)
+```
+
+
+### Packages
+
+```{r, warnings = F,message=F}
+#install.packages("rentrez")
+#install.packages("msa")
+#install.packages("phangorn")
+#install.packages("phytools")
+#install.packages("ape")
+
+library(rentrez)
+library(msa)
+library(phangorn)
+library(phytools)
+library(ape)
+```
+
+
+3 carnivore sequences from Table 7.4.  (Note that Table 7.4 is part of a multiple sequence alignment that has already used as scoring matrix during its construction)
+
+```{r}
+cat.seq   <-c("GTTGACCTCTTACT")
+hyena.seq <-c("GTTGACCTCTCACT")
+civet.seq <-c("GTTGACCTCTCACT")
+```
+
+We'll want to work with these as a character vector for some things.
+```{r}
+cat.vect   <- unlist(strsplit(cat.seq, split = "") )
+hyena.vect <- unlist(strsplit(hyena.seq, split = "") )
+civet.vect <- unlist(strsplit(civet.seq, split = "") )
+```
+
+
+We can look at the percent identity of each sequence using the ifelese() command.
+```{r}
+cat.vs.hyena   <- ifelse(cat.vect == hyena.vect, yes = 1 , no = 0)
+cat.vs.civet   <- ifelse(cat.vect == civet.vect, 1 , 0)
+hyena.vs.civet <- ifelse(hyena.vect == civet.vect, 1 , 0)
+```
+
+We also need the lengths, which are all the same b/c there are no indels
+```{r}
+length(cat.vect) == length(hyena.vect)
+
+l.vect <- length(cat.vect)
+```
+
+Percent identity
+```{r}
+pid_cat.vs.hyena <- sum(cat.vs.hyena)/l.vect
+pid_cat.vs.civet <- sum(cat.vs.civet)/l.vect
+pid_hyena.vs.civet <- sum(hyena.vs.civet)/l.vect
+```
+
+Make a matrix of percent identity for these three sequences
+
+```{r}
+cat.row   <- c(1,               pid_cat.vs.civet,   pid_cat.vs.hyena)
+civet.row <- c(pid_cat.vs.civet,1,                  pid_cat.vs.hyena)
+hyena.row <- c(pid_cat.vs.hyena,pid_hyena.vs.civet, 1)
+```
+
+Make the matrix
+
+```{r}
+pid.matrix <- rbind(cat = cat.row,
+                    civet = civet.row,
+                    hyena = hyena.row)
+
+colnames(pid.matrix) <- c("cat","civet","hyena")
+
+pid.matrix
+```
+
+
+
+Distance is the converse of idenity.  Things with a high PID have a low distance between them.  Distance = 1- PID
+
+```{r}
+dist.mat <- 1-pid.matrix
+
+dist.mat
+```
+
+
+
+If there were indels we'd have to actually align the sequences to do this correctly; recall that indels are not counted.
+
+These distances are not the same as those shown in table 8.5. I'm not sure why this is different.  
+
+Note that we can calcualte distance directly by changing how we score things.  
+
+```{r}
+cat.vs.hyena   <- ifelse(cat.vect == hyena.vect, yes = 0 , no = 1)
+cat.vs.civet   <- ifelse(cat.vect == civet.vect, 0 , 1)
+hyena.vs.civet <- ifelse(hyena.vect == civet.vect, 0 , )
+
+sum(cat.vs.hyena)/l.vect
+```
+
+I was curious what their math works out to be.  They report cat vs hyena as a distance of 0.092 in table 8.5.  Distance is just differences/length so 
+
+Distance = differences/length
+0.092 = diff/length
+0.092*length = diff
+diff = 1.38 for length = 15
+
+Do they are using a different number of differences, a different length, or both.
+
+One possiblity is that they used the full sequences without telling me.
+
+I found the accession numbers from the original paper they base this case stud off of
+```{r}
+seal <- entrez_fetch(db = "nucleotide", 
+                          id = "AF039744", 
+                          rettype = "fasta")
+
+hyena <- entrez_fetch(db = "nucleotide", 
+                          id = "AF039728", 
+                          rettype = "fasta")
+
+cat <- entrez_fetch(db = "nucleotide", 
+                          id = "AF039724", 
+                          rettype = "fasta")
+```
+
+I can then align them with the Biostring function pairwiseAlignment()
+
+```{r}
+hyena.vs.cat.global <- pairwiseAlignment(hyena, cat)
+```
+
+This has a percent identity function pid()
+```{r}
+1-pid(hyena.vs.cat.global)/100
+```
+
+This isn't the same.  So I have no idea how they got their distance matrix.
+
+For the time being I'll move on with their distance matrix from table 8.5 page 233
+
+```{r}
+cat8.4   <- c(0,    0.000, 0)
+hyena8.4 <- c(0.092,0.000, 0)
+civet8.4 <- c(0.081,0.092, 0)
+
+dist8.4 <- rbind(cat8.4,
+                 hyena8.4,
+                 civet8.4)
+
+colnames(dist8.4) <- c("cat","hyena","civet")
+```
+
+
+Pairwise distances underestimate real evolutionary distances because phylogentists ideally would like to know about every signle mutational event that occurred in a DNA sequence.  However, we can only see the end product, and there are many mutational events the can obscure previous mutations (convergence, parralel mutations, back mutations, etc).
+
+Models of DNA sequence evolution can be used to estimate a correction factor.  These are all parametric models that use probablity distributions.  When used in conjunction with clustering algorithms they result in a semi-parametric phylogentic tree.
+
+The simplest correction is the poisson correction.  This just applies some math about what we know about the statitcal distribution of countable things to the number of DNA mutations.  (other dcountable things  you could model include the number of flowers on a plant, the of offspring a person has, the number of cancers in an organ).  Overall this is a very basic model:
+
+d.p = -ln(1 - p)
+
+We can write a function
+```{r}
+dist_poisson <- function(p){
+   d.p <- -log(1-p)
+   return(d.p)
+}
+```
+(we could also write a function using the number of differences and the sequene length if we wanted)
+
+And apply it to our matrix.  This results in slightly larger distance.
+
+```{r}
+dist_poisson(dist8.4)
+```
+
+In Tree Thinking they discuss how you can think about DNA mutations in terms of a transition matrix.  These transition matrix are used directly in parametric statistical models; they can also be distilled down to a single equation for use in distance calcualtions and semi-parametric phylogenies
+
+The Jukes-Cantor model is the simplest model of sequence evolution (Figure 8.4 and 8.5 in Tree Thinking.  It makes some assumptions that are obviously false
+
+1.The rate of mutation is equal between all bases
+2.The background frequeny of bases is equal.
+
+Despite these obviously false assumptions its useful.  For distance calculatin the matrices (eg Figure 8.5) can be boilded down to
+
+d.jc= -3/4 * ln(1- 4/3*p)
+
+We can write a function
+
+```{r}
+dist_jc <- function(p){
+   d.jc <- -3/4 * log(1- 4/3*p)
+   return(d.jc)
+}
+```
+
+We can apply this to the matrix.  Thesve values can be seen for all the carnivore data in Table 8.6 of tree thinking.
+
+```{r}
+dist8.4.JC <- dist_jc(dist8.4)
+```
+
+
+
+An interesting feature of the JC model can be seen by exploring it accross a range of distances.  This allows us to recreate Figure 8.12.  When you run this errors will be thrown.
+
+```{r}
+p <- seq(0,1,0.005)
+dists <- dist_jc(p)
+
+plot(p ~ dists)
+```
+
+Not that we plot this with dist on the x axis and p on the y axis.  This is because dist is what is actually going on in nature - the number of mutations, and p is just what we are able to see as the end result.
+
+At what evolutionary distance does the graph asymptote?  Why?  
+
+This value has a mathematical reason you can see by looking at the equation.  Biologically, it represents how after a certain evolutionary distance back mutations and convergence will result in apparent similarities between sequene (increased PID, decreased distnace).  For the JC model this is at raw pairwise distance of 0.75 (75% of sites are different)
+
+If you look careful at the JC matrix there's a lot goign on, but actually there's just 2 function: one for the diagonal 
+(1/4 + 3/4*exp(-4/3 x ut)), 
+
+and one for everything else 
+(1/4 - 1/4*exp(-4/3 x ut))
+
+In these equations "u" is the mutation rate and "t" is time.  In practice we can't dis-entangle these (the reason why is beyond the scope of this class) so while ut is actually u X t,  is treated as a single parameter (see Figure 8.10).  So, the JC model as 1 parameter (ut) and 2 functions
+
+
+There are many parametric models of sequence evolution which can be used to correct raw distances (Figure 8.10) and to build semi-parametric cluster-based trees, or used in full-blown parametric phylogeny estimation.  The models generally try to address these issues:
+
+1.Differences in the frequency of differene bases (F81 model, Fig. 8.6-8.8).   This model adds a parameter for the frequency of each base (4 additional  parameters freqA, freqC, freqG, freqT; see y axis on figure 8.10)
+2.Differences in transition-transversion frequencies (HKY model, figure 8.9).  This uses the F81 model as a basis (4 paramsters for base frequencies) PLUS adds a single relative rate parameter (Kappa) for the relative rate of transitions (Purine to Purine, Pyrimidine to Pyrimidine) versus transversions (Purine to Pyrimidine).  This results in a total of 5 more parameters (freqA, freqC, freqG, freqT, kappa).
+3.Variation in mutation rates for all possible transitions, not just transition transverion (eg, A to T, A to G, and A to C can all have different rates).    This is the GTR (General time reversible model)
+4.Variation in mutation rates ("rate heterogeneity") between different places in a sequence.  To mutations rates in one part of the molecule, say near the start codon, can be different than those elsewhere, eg near the active site of an enzyme.
+
+The F81 model is structure so that each column of the matrix has two general functions: one on the diagonal (eg A to A) amd one for the other elments (A to C, A to G, A to T). So the F81 model has 5 parameters (ut, freqA, freqC, freqG, freqT) and 8 functions (1 for each diagonal element, and 1 for each column).
+
+The HKY model is structured so that each diagonal is a  unique function (similar to F81) and within each column there is a different function for the transition versus the transversions.  So for the A column of the matrix there is functions for A to A, a function for A to G (transition of purine to purine), and a function for transversions (A to T, A to C).
+
+The GTR model has 10 parameters and 16 functions.  See https://en.wikipedia.org/wiki/Models_of_DNA_evolution#GTR_model_(Tavar%C3%A9_1986)
+
+For all of this I am intersted in the structure of the matrix and what it represents biologicaly, and not worried about what the parameters are or how the matrices are used.
+
+Note that all of these models are set up for DNA.  Its possible to apply Jukes-Cantor logic to proteins; the function is
+
+```{r}
+d.jc.prot <- function(p){
+   -19/20 * log(1 - 20/19*p)
+}
+```
+
+This function has the same assumptions as the JC-DNA model, just applied to 
+
+All of models can be reduced down to single equations which correct for the number of parameters.  I don't have all the equations handy but one I do have is for a mutation model not in Tree Thinking: "The Kimura 2-parameter model" (K2P)  The model ignores the issues addressed by the F81 model (differences in base frequencies) and just addresses transition-transversion differences.  It therefore has 2 parameters and 2 functions.  As for F81 there is a function for the diagonal (A to A, C to C etc).  THere is also functions for transitions (A to G) and transversions (A to C, A to T).  The transversion function is the same for all transversions (A to C, G to C etc) and the transition function is the same for all  transition (A to G, C to T).
+
+
+A function for K2P takes 2 inputs: the number of transitions and the number of transversions.  
+
+```{r}
+d.K2P <- function(P, Q){
+   -1/2 * log(1 - 2*P - Q) - 1/4*log(1 - 2*Q)
+}
+```
+
+## A bigger matrix
+
+Add a more distance relative
+```{r}
+              #mole   cat
+mole8.4    <- c(0,    0,    0,     0,    0,    0)
+cat8.4     <- c(0.244,0.000,0,     0,    0,    0)
+hyena8.4   <- c(0.269,0.092,0.000, 0,    0,    0)
+civet8.4   <- c(0.246,0.081,0.092, 0,    0,    0)
+walrus8.4  <- c(0.283,0.187,0.199, 0.183,0,    0)
+sealion8.4 <- c(0.287,0.193,0.198, 0.187,0.028,0)
+
+dist8.4 <- rbind(mole8.4,
+                 cat8.4,
+                 hyena8.4,
+                 civet8.4,
+                 walrus8.4,
+                 sealion8.4)
+
+colnames(dist8.4) <- c("mole","cat","hyena","civet", "walrus", "sealion")
+```
+
+Calculate JC distance
+
+```{r}
+dist8.4.JC <- dist_jc(dist8.4)
+```
+
+
+## Semi-parametric tree
+
+We can compare trees built with
+
+```{r}
+#convert to dist object
+dist8.4.dist       <- as.dist(dist8.4)
+dist8.4.JC.dist    <- as.dist(dist8.4.JC)
+
+# build UPGMA trees
+upgma8.4           <- upgma(dist8.4.dist)
+upgma8.4.JC        <- upgma(dist8.4.JC.dist)
+
+
+```
+
+Plot them.  In this case there isn't much difference in the branch lengths.  This is because we're looking at relatively closely related mammals.  If we looked a more distantly related organism (fruit fly, fish) differences might become apparent.
+
+```{r}
+par(mfrow = c(1,2))
+plot(upgma8.4, main = "raw dist")
+plot(upgma8.4.JC, main = "JC dist")
+```
+
+
+UPGMA is not used for real phylogenies, only for guide trees.  Neighbor joining is used for semi-parametric, cluster-based trees (Eg, it can be done via BLAST I think)
+
+```{r}
+nj8.4           <- nj(dist8.4.dist)
+nj8.4.JC        <- nj(dist8.4.JC.dist)
+
+plot(nj8.4, main = "NJ: raw dist")
+plot(nj8.4.JC, main = "NJ: JC dist")
+```
+
+
+
+## Parsimony analysis of DNA
+
+
+
+```{r}
+             #   123456
+mole.seq    <-c("GTTAA CTTCTCACT")
+cat.seq     <-c("GTTGA CCTCTTACT")
+hyena.seq   <-c("GTTGA CCTCTCACT")
+civet.seq   <-c("GTTGA CCTCTCACT")
+dog.seq     <-c("GTTAAGCATCTGCCT")
+racoon.seq  <-c("GTTAAGGGTCTGCCT")
+bear.seq    <-c("CTTAAGTGTCTGCCT")
+otter.seq   <-c("GTTAAGGGTCTGCCT")
+seal.seq    <-c("GTAAAGCGTCTGCCT")
+walrus.seq  <-c("GTAAAGCGTCTGCCT")
+sealion.seq <-c("GTAAAGCGTCTGCCT")
+
+mole.seq <- unlist(strsplit(mole.seq,""))
+cat.seq <- unlist(strsplit(cat.seq,""))
+hyena.seq <- unlist(strsplit(hyena.seq,""))
+civet.seq <- unlist(strsplit(civet.seq,""))
+dog.seq <- unlist(strsplit(dog.seq,""))
+racoon.seq <- unlist(strsplit(racoon.seq,""))
+bear.seq <- unlist(strsplit(bear.seq,""))
+otter.seq <- unlist(strsplit(otter.seq,""))
+seal.seq <- unlist(strsplit(seal.seq,""))
+walrus.seq <- unlist(strsplit(walrus.seq,""))
+sealion.seq <- unlist(strsplit(sealion.seq,""))
+
+table7.3 <- rbind(mole = mole.seq,
+      cat = cat.seq,
+      hyena = hyena.seq,
+      civet = civet.seq,
+      dog = dog.seq,
+      racoon = racoon.seq,
+      bear = bear.seq,
+      otter = otter.seq,
+      seal = seal.seq,
+      walrus = walrus.seq,
+      sealion = sealion.seq)
+```
+
+
+Convert to phydata.  Note this throws an error due to the indel, which therefore gets removed.
+```{r}
+table7.3phyDat <- phangorn::phyDat(table7.3, type = "DNA")
+```
+
+I'll just use parsimony ratchet to build the tree (not yet sure what errors mean yet)
+
+```{r, warning = F}
+table7.3.prat <- phangorn::pratchet(table7.3phyDat, trace = 0)
+```
+
+Root the tree
+```{r}
+table7.3.prat.root <- root(table7.3.prat,
+                               outgroup = "mole", 
+                               resolve.root = T)
+```
+
+The tree is similar to Figure 7.13.  What are the differences?
+```{r}
+par(mfrow = c(1,1))
+plot(table7.3.prat.root)
+```
+
+
+Parsimony methods can include concepts of treating transitions and transversion differently.  This is via a **step matrix**.  The deafult step matrix (Fitch) treats a transition the same as transversion: all differenes between sequences count as a single evolutionary step (Tree thinking Figure 7.11).
+
+Alternatively transitiosn can be treated as 1 step and transversion as 2 steps because they are predicted to be less comon and take more time to occur (Tree thinking Figure 7.11).
+
+The default is a Fitch step matrix
+```{r, warning = F}
+table7.3.prat.fitch <- phangorn::pratchet(table7.3phyDat, 
+                                    method = "fitch",
+                                    trace = 0)
+```
+
+We can set an alternative, eg sankoff
+```{r, warning = F}
+table7.3.prat.sankoff <- phangorn::pratchet(table7.3phyDat, 
+                                    method = "sankoff",
+                                    trace = 0)
+```
+
+Root them
+```{r}
+table7.3.prat.fitch.root <- root(table7.3.prat.fitch,
+                               outgroup = "mole", 
+                               resolve.root = T)
+table7.3.prat.sank.root <- root(table7.3.prat.sankoff,
+                               outgroup = "mole", 
+                               resolve.root = T)
+```
+
+Plot them.   This results in a different structure.  One differene is the seal-sealion-walrus polytomy is resolved.
+```{r}
+par(mfrow = c(1,2))
+plot(table7.3.prat.fitch.root, main = "Fitch")
+plot(table7.3.prat.sank.root, mai = "Sankoff")
+```
+
+
+So far we've only had our algorithm return a single tree.  This ignores that fact that there can be TWO (or more) trees with the same length (R was just giving us one chosen at random).
+
+By setting all = TRUE I'll get both trees
+
+```{r}
+table7.3.prat.fitch.all <- phangorn::pratchet(table7.3phyDat, 
+                                    method = "fitch",
+                                    trace = 0, all = T)
+
+table7.3.prat.fitch.root.all <- root(table7.3.prat.fitch.all,
+                               outgroup = "mole", 
+                               resolve.root = T)
+
+par(mfrow = c(1,2))
+plot(table7.3.prat.fitch.root.all[[1]], main = "Best tree 1")
+plot(table7.3.prat.fitch.root.all[[2]], main = "Best tree 2")
+```
+
+When more than one tree exists they can be combined into a **consensus tree**.  We can combine them using ape::consensus
+
+```{r}
+table7.3.consensus <- consensus(table7.3.prat.fitch.root.all)
+```
+
+Plot it.  This is what Figure 7.13 shows, but I'm not able to reproduce it.
+```{r}
+par(mfrow = c(1,1))
+plot(table7.3.consensus, main = "consensus")
+```
+
+
+```{r}
+phangorn::optim.parsimony(tree = table7.3.consensus,
+          data = table7.3phyDat)
+
+RI(table7.3.prat.fitch.root.all[[2]],table7.3phyDat)
+```
+
+
+```{r}
+x <- paste(mole.seq,cat.seq,hyena.seq,sep = "")
+```
+
+sink("transth_tree_think.txt")
+cat(transth_tree_think)
+sink()
+file.show("transth_tree_think.txt")
+transth_tree_think_stringset <- Biostrings::readDNAStringSet("transth_tree_think.txt")
+# unlink(here::here("transth_tree_think.txt"))
+names(transth_tree_think_stringset)
+
+```{r}
+sink("x.txt")
+cat(x)
+sink()
+file.show("x.txt")
+xss <- Biostrings::readDNAStringSet("x.txt")
+# unlink(here::here("transth_tree_think.txt"))
+transth_tree_think_align <- msa(transth_tree_think_stringset,
+                     method = "ClustalW")
+
+```
+
+##
+
+Download one sequence
+
+
+```{r}
+# AF039744
+
+seal <- entrez_fetch(db = "nucleotide", 
+                          id = "AF039744", 
+                          rettype = "fasta")
+```
+
+
+```{r}
+seal <- gsub("\\n","",seal)
+```
+
+```{r}
+
+```
+
+ 
+
+
+
+```{r}
+
+
+hyena <- entrez_fetch(db = "nucleotide", 
+                          id = "AF039728", 
+                          rettype = "fasta")
+
+hyena <- gsub("\\n","",hyena)
+
+nchar(hyena)
+nchar(seal)
+
+stringr::str_locate(hyena,"GTTGA")
+
+```
+
+
+### Molecular data: transthyretin Intro I
+
+The authors write in their acknowledgemetns sections "The new nucleotide sequences reported in this paper have been deposited with GenBank under Accession Nos. AF039722–AF039745" (this should be in the methods...).
+
+I want to download all of these accession numbers.  This is how I did it
+
+First, the part that's  constant for all of them: "AF039"
+```{r}
+accession.prefix <- "AF039"
+```
+
+Then the part that varies: 722-745.
+```{r}
+accession.suff <- seq(722,745,1)
+```
+
+Past together
+```{r}
+accessions <- paste(accession.prefix,accession.suff, sep = "")
+```
+
+How many?
+```{r}
+length(accessions)
+```
+
+The methods say "Nucleotide sequence variation in the nuclear transthyretin intron I was examined for 22 species of carnivorans, and 3 noncarnivoran eutherian outgroups".  I might be missing one but I won't worry about that.
+
+
+
+Set up the common names into dataframe
+```{r}
+common_names_full <- c("Beluga whale",
+"Eastern mole",
+"European wildcat",
+"lion",
+"Common kusimanse",
+"Ring-tailed vontsira",
+"Spotted hyena",
+"African palm civet",
+"Asian palm civet",
+"Malayan civet",
+"wolf",
+"red fox",
+"Neotropical otter",
+"Long-tailed weasel",
+"raccoon",
+"Kinkajou",
+"giant panda",
+"Red panda",
+"Spectacled bear",
+"brown bear",
+"bearded seal",
+"walrus",
+'Northern fur seal',
+"California sea lion")
+```
+
+```{r}
+common_names_short <- c("whale",
+"mole",
+"wildcat",
+"lion",
+"kusimanse",
+"vontsira",
+"hyena",
+"civet1",
+"civet2",
+"civet3",
+"wolf",
+"fox",
+"otter",
+"weasel",
+"raccoon",
+"Kinkajou",
+"panda",
+"Red panda",
+"spectacled bear",
+"brown bear",
+"seal",
+"walrus",
+"seal",
+"sea lion")
+```
+
+
+```{r}
+latin_names <- c("Delphinapterus leucas",
+"Scalopus aquaticus",
+"Felis silvestris",
+"Panthera leo",
+"Crossarchus obscurus",
+"Galidia elegans",
+"Crocuta crocuta",
+"Nandinia binotata",
+"Paradoxurus hermaphroditus",
+"Viverra tangalunga",
+"Canis lupus",
+"Vulpes vulpes",
+"Lontra longicaudis",
+"Mustela frenata",
+"Procyon lotor",
+"Potos flavus",
+"Ailuropoda melanoleuca",
+"Ailurus fulgens",
+"Tremarctos ornatus",
+"Ursus arctos",
+"Erignathus barbatus",
+"Odobenus rosmarus",
+"Callorhinus ursinus",
+"Zalophus californianus")
+```
+
+
+```{r}
+treethink_spp <- c("cat", "hyena","civet","dog","racoon", "bear","otter","seal","walrus","sealion")
+```
+
+
+```{r}
+tree_think_names <- rep(NA, 24)
+```
+
+Make dataframe
+```{r}
+species_names <-cbind(common_names_full,
+                      common_names_short,
+                      latin_names,
+                      accessions,
+                      tree_think_names)
+```
+
+```{r}
+
+```
+
+
+```{r}
+i.cat <- grep("wildcat", species_names[,"common_names_short"])
+i.mole <- grep("mole", species_names[,"common_names_short"])
+i.hyena <- grep("hyena", species_names[,"common_names_short"])
+i.civet <- grep("civet", species_names[,"common_names_short"])
+i.dog <- grep("wolf", species_names[,"common_names_short"])
+i.trashpanda <- grep("racoon", species_names[,"common_names_short"])
+i.bear <- grep("brown bear", species_names[,"common_names_short"])
+#i.bear <- grep("spectacled bear", species_names[,"common_names_short"])
+i.otter <- grep("otter", species_names[,"common_names_short"])
+i.seal <- grep("seal", species_names[,"common_names_short"])
+i.walrus <- grep("walrus", species_names[,"common_names_short"])
+i.sealion <- grep("sea lion", species_names[,"common_names_short"])
+
+species_names[i.cat,"tree_think_names"] <- "cat"
+species_names[i.mole,"tree_think_names"] <- "mole"
+species_names[i.hyena,"tree_think_names"] <- "hyena"
+species_names[i.civet[1],"tree_think_names"] <- "civet"
+species_names[i.dog,"tree_think_names"] <- "dog"
+species_names[i.trashpanda,"tree_think_names"] <- "racoon"
+species_names[i.bear,"tree_think_names"] <- "bear"
+species_names[i.otter,"tree_think_names"] <- "otter"
+species_names[i.seal,"tree_think_names"] <- "seal"
+species_names[i.walrus,"tree_think_names"] <- "walrus"
+species_names[i.sealion,"tree_think_names"] <- "sealion"
+
+```
+
+
+### Download sequences
+
+
+
+```{r}
+i.treethink <- which(species_names[,"tree_think_names"] %in% treethink_spp)
+species_names[i.treethink,]
+transth_tree_think <- entrez_fetch(db = "nucleotide", 
+                          id = species_names[i.treethink,"accessions"], 
+                          rettype = "fasta")
+```
+
+
+Create source file for MSA workflow
+```{r}
+sink("transth_tree_think.txt")
+cat(transth_tree_think)
+sink()
+file.show("transth_tree_think.txt")
+```
+
+
+
+Set up the data
+```{r}
+transth_tree_think_stringset <- Biostrings::readDNAStringSet("transth_tree_think.txt")
+# unlink(here::here("transth_tree_think.txt"))
+names(transth_tree_think_stringset)
+```
+
+
+
+Swap out latin names for common nmes
+
+```{r}
+transth_tree_think_stringset@ranges@NAMES <- species_names[i.treethink,"tree_think_names"]
+
+
+```
+
+```{r}
+transth_tree_think_align <- msa(transth_tree_think_stringset,
+                     method = "ClustalW")
+```
+
+
+```{r}
+str(transth_tree_think_align)
+```
+
+
+
+ Amphicyonidae† ("bear-dogs")
+ Canidae (wolves, foxes)
+ Hemicyonidae† ("dog-bears")
+ Ursidae (bears)
+ Ailuridae (red pandas)
+ Enaliarctidae† (extinct pinnipeds)
+ Odobenidae (walrus)
+ Otariidae (sea lions)
+ Phocidae (true seals)
+ Mephitidae (skunks)
+ Mustelidae (weasels, wolverines)
+ Procyonidae (raccoons, kinkajous)
+ 
+ "A large 266-base-pair
+insertion specific to Caniformia was excluded from
+phylogenetic analyses considering that it had multiple
+repeat elements that made alignment difficult. The
+total number of sites remaining was 851 (291 parsimony
+informative) available for phylogenetic analysis."
+ 
+```{r}
+x <- c("CTTTGGCTCAGGTCATGATCCCAGGGCCCTGGGATCRAGSCCCACATTGGGCTCCTGGYTCAGGAGGGAACCTGCT--TCTCCCTCTCCCTGCTG----CTCCCTGTGCTTGTGCTCTCTCTCTCTC------AAATAAA----GAAAATCTTAAAATAA--------GAAAAAGAATAGATTCTGTCACTCTTACCAGTTTTGTTGACCTCTCACTGGC")
+
+nchar(x)
+```
+ 
+ 
+```{r}
+y <- c("GGGGCACCTGGATAGCTCAGTTGGTTAAGCATCTGCCTTCGGCTCGGGTCATGGTCCTGAGGTCTTGAGATCAAGTCCCACATCGGGCTCCCTGCTCCACGGGAAGCCTGCTTCTCCCTCTCCCTCTGCCTGTCACTCCCCCAGGTTGTGCTCTCCCTCCTTCTGTC--AAATAAATAAATGAAATCTGAAAATTTTTTAAAAATGAAAAGAATAGATCCTTTCCCTCTTATCACTTTTGTTGACTTCTTTATGGC")
+nchar(y)
+```
+ 
+```{r}
+print(transth_tree_think_align, 
+      show=c("alignment","complete"), 
+      showNames=TRUE, 
+      showConsensus=FALSE, 
+      halfNrow=9, nameWidth=20)
+```
+
+### Full alignment
+```{r}
+msaPrettyPrint(transth_tree_think_align)
+
+msaPrettyPrint(transth_tree_think_align, 
+               #output="asis", 
+              #y=c(2000, 2100),
+               showNames="left", 
+               #showLogo="top",
+               consensusColor="ColdHot", 
+               shadingMode = "functional",
+               shadingModeArg = "structure",
+               showLegend=TRUE,
+               showConsensus = "bottom",
+               askForOverwrite=FALSE)
+```
+
+
+```{r}
+transth_tree_think_align2 <- msaConvert(transth_tree_think_align, type="seqinr::alignment")
+```
+
+## Distances - raw
+
+```{r}
+transth_tree_think_dist <- seqinr::dist.alignment(transth_tree_think_align2, "similarity")
+```
+
+
+```{r}
+
+transth_tree_think_tree <- nj(transth_tree_think_dist)
+plot(transth_tree_think_tree)
+```
+
+```{r}
+phangorn::phyDat(transth_tree_think_align2)
+
+is(transth_tree_think_align)
+```

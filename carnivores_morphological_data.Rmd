@@ -1,0 +1,309 @@
+---
+title: "Analysis of morphological data"
+author: "Nathan Brouwer"
+date: "11/23/2019"
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Preliminaries
+
+### Packages
+
+```{r}
+#install.packages("rentrez")
+#install.packages("msa")
+#install.packages("phangorn")
+#install.packages("phytools")
+#install.packages("ape")
+
+library(rentrez)
+library(msa)
+library(phangorn)
+library(phytools)
+library(ape)
+
+
+#install.packages("Rphylip")
+library(Rphylip)
+#path <- "/Applications/phylip-3.695/exe/"
+```
+
+
+
+### Data
+
+#### Carnivore morphological data
+
+12 morphological characters (Table 7.1) scored as 0 (trait absent, or trait is in inferred ancestral state) or 1 (trait present, or trait is different than inferred ancestral condition).  This is binary scoring.  Alternatively, traits could be ranked or "ordinal."  See Table 1 FELSENSTEIN (1984) for an example of ordinal scores.
+
+A preliminary data matrix is in Table 7.2 (pg 177).  Slightly edited matrix is in Table 7.4 (few differences from Table 7.2; question marks set to 0 for Outgroup.)  Table 7.9 expands it to 20 characters for additional analyses..
+
+##### Table 7.2 / 7.4
+
+Tables 7.2 and 7.4 present 12 morphological traits.
+
+
+```{r}
+#data
+outgroup <-c(0,0,0,0,0,0,0,0,0,0,0,0)
+cat      <-c(0,1,0,1,0,0,1,1,1,0,0,0)
+hyena    <-c(0,1,0,1,0,0,1,0,1,0,0,0)
+civet    <-c(0,1,0,0,0,0,0,0,1,0,0,0)
+dog      <-c(1,0,0,0,1,0,0,0,0,0,0,0)
+racoon   <-c(1,0,0,0,1,0,0,0,0,0,0,0)
+bear     <-c(1,0,0,0,1,1,0,0,0,1,0,0)
+otter    <-c(1,0,0,0,1,0,0,0,0,1,0,0)
+seal     <-c(1,0,1,0,1,1,0,0,0,1,1,1) 
+walrus   <-c(1,0,1,0,1,1,0,0,0,1,1,1)
+sealion  <-c(1,0,1,0,1,1,0,0,0,1,0,0)
+
+#rbind it
+carn7.4 <- rbind(outgroup = outgroup, #?mole?
+            cat = cat,
+            hyena = hyena,
+            civet = civet,
+            dog = dog,
+            racoon = racoon,
+            bear = bear,
+            otter = otter,
+            seal = seal,
+            walrus = walrus,
+            sealion = sealion)
+
+```
+
+
+
+### Old school phylogenies: "Hennigian Inference"
+
+non-parametric
+
+One of first formal methods to create trees was developed by Willi Henning.  If you learned how to build trees in a biology class you probably were taught some of the ideas behind this method.  This method is no longer in use and I can't find any R code that implements it.  Figure 7.4 in Tree Thinking Shows a tress based on the morphological data in Table 7.4 that was build using Henningian Inference using the program Phyllip.
+
+Henningian Inference makes strong assumptions; its useful for learning how to think about tree construction but isn't used outside of the classroom.
+
+HI is a non-parametric, heuristic algorithm.
+
+
+### Middle school phylogenies: Parsimony
+
+non-parametric
+
+just b/c there are numbers/math =/= parametric
+
+
+**Maximum parsimony** is the primary way to analyze morphological data, though other methods can be used - and probably should be.  Maximum parsimony was also used previously to analyze sequence data, but this is rarely if ever done any more.
+
+"Despite the introduction of likelihood-based methods for estimating phylogenetic trees from phenotypic data, parsimony remains the most widely-used optimality criterion for building trees from discrete morphological data." Wright and Hillis 2014 https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0109210
+
+A morphological data matrix can be converted to a **distance matrix**, but this isn't a standard practice; its done in *Tree Thinking* just to illustrate the principle of a distance matrix.  
+
+
+##### Full trait matrix: Table 7.9
+
+20 binary morphological traits of carnivores
+
+```{r}
+#data
+outgroup <-c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+cat      <-c(0,1,0,1,0,0,1,1,1,0,0,0,1,1,1,0,0,0,0,0)
+hyena    <-c(0,1,0,1,0,0,1,0,1,0,0,0,1,1,1,1,0,0,0,0)
+civet    <-c(0,1,0,0,0,0,0,0,1,0,0,0,0,0,1,1,0,0,0,0)
+dog      <-c(1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+racoon   <-c(1,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0)
+bear     <-c(1,0,0,0,1,1,0,0,0,1,0,0,0,0,0,0,1,1,0,1)
+otter    <-c(1,0,0,0,1,0,0,0,0,1,0,0,1,0,1,1,1,0,0,0)
+seal     <-c(1,0,1,0,1,1,0,0,0,1,1,1,0,1,1,1,0,0,1,1) #large 4 originaly NA,0,1,1
+walrus   <-c(1,0,1,0,1,1,0,0,0,1,1,1,0,0,1,1,0,1,1,1)
+sealion  <-c(1,0,1,0,1,1,0,0,0,1,0,0,0,1,1,1,0,1,1,1)
+
+#rbind it
+carn7.9 <- rbind(outgroup = outgroup, #?mole?
+            cat = cat,
+            hyena = hyena,
+            civet = civet,
+            dog = dog,
+            racoon = racoon,
+            bear = bear,
+            otter = otter,
+            seal = seal,
+            walrus = walrus,
+            sealion = sealion)
+```
+
+
+
+## Analysis of morphological data
+
+
+### Exhaustive search
+
+The most basic way to search for an optimal tree is to search all possible trees.  This takes a long time and only works for 10 or fewer taxa.  You will always find the best possible tree with this method.
+
+### Branch and bound.
+
+For up to about 20 taxa the **branch and bound algorithm** can be used. Branch and bound will find the best tree much faster than an exhaustive search.  Beyond 20 taxa takes too long.
+
+
+
+### Heuristic searches
+
+Heuristic searches use algorithms to save time, at the cost of possibly not finding the absolutely best tree.
+Beyond 20 taxa heuristic search methods must be used for parsimony methods.  **Sub-tree pruning and re-grafting** is a common method.
+
+Heuristics searches work by trying to find progressively better trees by starting with a subset of taxa and exploring a small neighborhood of similar trees and finding the best ones.  Another taxa is added to the best trees and the algorithm continues.    Very sub optimal trees are therefore generally avoided.  This is called a **hill climbing algorithm** which climbs up the "hill" to the best tree with all the taxa, avoiding "valleys" of bad trees.
+
+When exploring **tree space** there can be **local optima** that represent trees that appear good to the algorithm because it is only exploring a local neighborhood of trees.  To avoid local optima heuristic searches are often run multiple times with different starting trees in order to make sure the very best tree is found.
+
+Modern methods can do parsimony on as many as 1000 taxa
+
+### Guide trees [key vocab]
+
+Fast algorithms like UPGMA and neighbor joining can be used to build guide trees that help heuristic searches proceed fast.
+
+### Building parsimony tree
+
+Takes some work to set this up
+
+First, convert the data to the phyData class
+```{r}
+carn7.9.phyDat <- phangorn::phyDat(carn7.9, type = "USER", levels = c(0,1))
+
+```
+
+It can take a LONG time to build phylogenetic trees.  We therefore frequently begining with a **guide tree**.  This is often done using distance-based method.  (I'll use the parsimony ratchet method here because its easy to do in R; many programs using UPGMA or neighbor honing) 
+
+```{r}
+carn7.9.guide <- phangorn::pratchet(carn7.9.phyDat, maxit=500,
+                        minit=5, k=5, trace=0)
+```
+
+```{r}
+plot(carn7.9.guide)
+```
+
+
+I'll root the tree using the root function
+```{r}
+carn7.9.guide.rooted <- root(carn7.9.guide,
+                               outgroup = "outgroup", 
+                               resolve.root = T)
+```
+
+Now I'll run an extended search of all trees using the **branch and bound algorithm**.  I'll give it the **guide tree** which will give it a solid starting point for exploring **tree space**.  
+
+```{r}
+carn7.9.b.and.b<- phytools::exhaustiveMP(data = carn7.9.phyDat, 
+                                      tree=carn7.9.guide.rooted, # guide tree
+                                      method="branch.and.bound")
+
+carn7.9.b.and.b.rooted <- root(carn7.9.b.and.b,outgroup = "outgroup", resolve.root = T)
+
+```
+
+### Figure 7.10 
+
+The final tree is similar to the right-hand panel on page 194.  They consider to two most parsimonious trees.  I'm not yet sure how to exactly reproduce their results.  
+
+```{r}
+plot(carn7.9.b.and.b.rooted)
+```
+
+
+
+We can see how many steps it took to build the tree using the parsimony()() command, every time a trait appears is 1 step; every time a trait is lost is one step.  The total number of steps is the parsimony score or **tree length**.  
+
+```{r}
+parsimony(carn7.9.b.and.b.rooted,
+          carn7.9.phyDat)
+```
+
+
+### Consistency index
+
+The consistency index is "A measure of how well or poorly a particular character or set of characters fits a tree: the minimum number of steps possible divided by the number of steps required to explain the character(s) on the tree.  Trees with higher consistency indices have less homoplasy" (homoplasy = convergent evolution OR evolutionary reversal).  Convergence/reversal makes tree building tricky.  The CI is an index which allows to compare different trees in terms of the amount of convergence/reversal.
+
+The CI for this tree is 0.67 (see page 193).  Please read page 21, Table 2.2, 93-99, 181-185, and  for more on the CI.  Note I will not use the term "homoplasy" without reminding you that it relates to convergence/reversal.
+
+```{r}
+phangorn::CI(carn7.9.b.and.b.rooted, carn7.9.phyDat)
+```
+
+
+Table 2.2 reports a number of CIs from other trees.
+```{r}
+CIs.2.2 <- c(0.81,0.21,0.76,0.51,0.32,0.95,0.23,0.58,0.3,0.83,0.81,0.42,0.7,0.22,0.85,0.79,0.44,0.35,0.68,0.51,0.4,0.9,0.28,0.67,0.59,0.6,0.59,0.86)
+```
+
+We can compare a CI of 0.67 to this distribution
+```{r}
+hist(CIs.2.2)
+abline(v = 0.67, col = 2)
+```
+
+
+
+### Distance-based methods for morphological data
+
+For building guide trees and for comparison purposes we can build trees using distance-based methods.
+
+First, we need to set up the data. In table 8.3 they show just 10 characters
+```{r}
+carn8.3 <- carn7.4[,1:10]
+```
+
+Now convert to the phyDat type
+```{r}
+carn8.3.phyDat <- phangorn::phyDat(carn8.3, type = "USER", levels = c(0,1))
+```
+
+
+Second, we convert out data matrix to a distance matrix.  We'll use the *Hamming Distance** or *Edit distance*, which is the same as we use for DNA and proteins.
+```{r}
+carn8.3.dist <- dist.hamming(carn8.3.phyDat)
+carn8.3.dist
+```
+
+This is table 8.4 on page 232
+```{r}
+carn8.3.dist
+```
+
+UPGMA trees don't normally include the outgroup in the calculations
+```{r}
+carn8.3.no.out <- carn7.4[-1,1:10]
+carn8.3.no.outphyDat <- phangorn::phyDat(carn8.3.no.out, type = "USER", levels = c(0,1))
+carn8.3.no.out.dist <- dist.hamming(carn8.3.no.outphyDat)
+```
+
+We can now make a UPGMA tree
+```{r}
+carn8.3.no.out.UPGMA <- upgma(carn8.3.no.out.dist)
+```
+
+We can compare our parsimony and UPGMA trees
+```{r}
+par(mfrow = c(1,2))
+plot(carn8.3.no.out.UPGMA, main = "UPGMA")
+plot(carn7.9.b.and.b.rooted, main = "parsimony")
+```
+
+
+## Parametric models of morphological data
+
+Traditionally its been thought that you could/should only use parsimony on morphological data.  There are mathematical models for the evolution of morphological traits were are increasingly being used.
+
+
+The **Mk Model** is a parametric statistical model for morphological data.  You can do it in R but its not well documented and I ran out of time.
+
+http://blog.phytools.org/2015/09/the-difference-between-different.html
+
